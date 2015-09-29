@@ -9,7 +9,7 @@ import mygeotab
 import mygeotab.serializers
 
 
-class AsyncAPI(mygeotab.API):
+class API(mygeotab.API):
     def __init__(self, username, password=None, database=None, session_id=None, server='my.geotab.com'):
         """
         Creates a new instance of this simple Pythonic wrapper for the MyGeotab API.
@@ -24,7 +24,7 @@ class AsyncAPI(mygeotab.API):
         super().__init__(username, password, database, session_id, server)
 
     @asyncio.coroutine
-    def _query(self, method, parameters):
+    def _async_query(self, method, parameters):
         """
         Formats and performs the query against the API
 
@@ -44,7 +44,7 @@ class AsyncAPI(mygeotab.API):
         return self._process(json.loads(body, object_hook=mygeotab.serializers.object_deserializer))
 
     @asyncio.coroutine
-    def call(self, method, type_name=None, **parameters):
+    def async_call(self, method, type_name=None, **parameters):
         """
         Makes a call to the API.
 
@@ -61,25 +61,25 @@ class AsyncAPI(mygeotab.API):
         if type_name:
             parameters['typeName'] = type_name
         if self.credentials is None:
-            yield from self.authenticate()
+            self.authenticate()
         if 'credentials' not in parameters and self.credentials.session_id:
             parameters['credentials'] = self.credentials.get_param()
 
         try:
-            result = yield from self._query(method, parameters)
+            result = yield from self._async_query(method, parameters)
             if result is not None:
                 self._reauthorize_count = 0
                 return result
         except mygeotab.MyGeotabException as exception:
             if exception.name == 'InvalidUserException' and self._reauthorize_count == 0:
                 self._reauthorize_count += 1
-                yield from self.authenticate()
-                return (yield from self.call(method, parameters))
+                self.authenticate()
+                return (yield from self.async_call(method, parameters))
             raise
         return None
 
     @asyncio.coroutine
-    def multi_call(self, *calls):
+    def async_multi_call(self, *calls):
         """
         Performs a multi-call to the API
 
@@ -88,24 +88,24 @@ class AsyncAPI(mygeotab.API):
         :raise MyGeotabException: Raises when an exception occurs on the MyGeotab server
         """
         formatted_calls = [dict(method=call[0], params=call[1]) for call in calls]
-        return (yield from self.call('ExecuteMultiCall', calls=formatted_calls))
+        return (yield from self.async_call('ExecuteMultiCall', calls=formatted_calls))
 
     @asyncio.coroutine
-    def get(self, type_name, **parameters):
+    def async_get(self, type_name, **parameters):
         """
-        Gets entities using the API. Shortcut for using call() with the 'Get' method.
+        Gets entities using the API. Shortcut for using async_call() with the 'Get' method.
 
         :param type_name: The type of entity
         :param parameters: Additional parameters to send.
         :return: The JSON result (decoded into a dict) from the server
         :raise MyGeotabException: Raises when an exception occurs on the MyGeotab server
         """
-        return (yield from self.call('Get', type_name, **parameters))
+        return (yield from self.async_call('Get', type_name, **parameters))
 
     @asyncio.coroutine
-    def search(self, type_name, **parameters):
+    def async_search(self, type_name, **parameters):
         """
-        Searches for entities using the API. Shortcut for using get() with a search.
+        Searches for entities using the API. Shortcut for using async_get() with a search.
 
         :param type_name: The type of entity
         :param parameters: Additional parameters to send.
@@ -117,73 +117,43 @@ class AsyncAPI(mygeotab.API):
             if results_limit is not None:
                 del parameters['resultsLimit']
             parameters = dict(search=parameters)
-            return (yield from self.call('Get', type_name, resultsLimit=results_limit, **parameters))
-        return (yield from self.get(type_name))
+            return (yield from self.async_call('Get', type_name, resultsLimit=results_limit, **parameters))
+        return (yield from self.async_get(type_name))
 
     @asyncio.coroutine
-    def add(self, type_name, entity):
+    def async_add(self, type_name, entity):
         """
-        Adds an entity using the API. Shortcut for using call() with the 'Add' method.
+        Adds an entity using the API. Shortcut for using async_call() with the 'Add' method.
 
         :param type_name: The type of entity
         :param entity: The entity to add
         :return: The id of the object added
         :raise MyGeotabException: Raises when an exception occurs on the MyGeotab server
         """
-        return (yield from self.call('Add', type_name, entity=entity))
+        return (yield from self.async_call('Add', type_name, entity=entity))
 
     @asyncio.coroutine
-    def set(self, type_name, entity):
+    def async_set(self, type_name, entity):
         """
-        Sets an entity using the API. Shortcut for using call() with the 'Set' method.
+        Sets an entity using the API. Shortcut for using async_call() with the 'Set' method.
 
         :param type_name: The type of entity
         :param entity: The entity to set
         :raise MyGeotabException: Raises when an exception occurs on the MyGeotab server
         """
-        return (yield from self.call('Set', type_name, entity=entity))
+        return (yield from self.async_call('Set', type_name, entity=entity))
 
     @asyncio.coroutine
-    def remove(self, type_name, entity):
+    def async_remove(self, type_name, entity):
         """
-        Removes an entity using the API. Shortcut for using call() with the 'Remove' method.
+        Removes an entity using the API. Shortcut for using async_call() with the 'Remove' method.
 
         :param type_name: The type of entity
         :param entity: The entity to remove
         :raise MyGeotabException: Raises when an exception occurs on the MyGeotab server
         """
-        return (yield from self.call('Remove', type_name, entity=entity))
-
-    @asyncio.coroutine
-    def authenticate(self):
-        """
-        Authenticates against the API server.
-
-        :return: A Credentials object with a session ID created by the server
-        :raise AuthenticationException: Raises if there was an issue with authenticating or logging in
-        :raise MyGeotabException: Raises when an exception occurs on the MyGeotab server
-        """
-        auth_data = dict(database=self.credentials.database, userName=self.credentials.username,
-                         password=self.credentials.password)
-        auth_data['global'] = True
-        try:
-            result = yield from self._query('Authenticate', auth_data)
-            if result:
-                new_server = result['path']
-                server = self.credentials.server
-                if new_server != 'ThisServer':
-                    server = new_server
-                c = result['credentials']
-                self.credentials = mygeotab.Credentials(c['userName'], c['sessionId'], c['database'],
-                                               server)
-                return self.credentials
-        except mygeotab.MyGeotabException as exception:
-            if exception.name == 'InvalidUserException':
-                raise mygeotab.AuthenticationException(self.credentials.username,
-                                              self.credentials.database,
-                                              self.credentials.server)
-            raise
+        return (yield from self.async_call('Remove', type_name, entity=entity))
 
 __title__ = 'mygeotab-async'
 __author__ = 'Aaron Toth'
-__version__ = '0.1'
+__version__ = '0.2'
